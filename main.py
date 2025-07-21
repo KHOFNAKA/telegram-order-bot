@@ -112,6 +112,12 @@ def get_yes_no_keyboard(action):
         [{"text": "✅ بله", "callback": f"{action}_yes"}, {"text": "❌ خیر", "callback": f"{action}_no"}]
     ])
 
+def get_cancel_keyboard():
+    """کیبورد لغو سفارش"""
+    return create_glass_keyboard([
+        [{"text": "🚫 لغو سفارش", "callback": "cancel_order"}]
+    ])
+
 def get_menu_keyboard():
     return {
         "keyboard": [
@@ -135,7 +141,7 @@ def get_orders_selection_keyboard():
     keyboard_data = []
     active_orders = []
     
-    for sess in sessions.values():
+    for sess_key, sess in sessions.items():
         if sess.get("order_id") and sess.get("step") == "completed":
             order_id = sess["order_id"]
             customer_name = sess.get("name", "نامشخص")
@@ -201,6 +207,8 @@ def handle_admin_callback(chat_id, callback_data, message_id):
         elif action == "reject":
             edit_message(chat_id, message_id, f"<b>❌ رد سفارش {order_id}:</b>\nلطفاً دلیل رد را وارد کنید:")
             sessions[chat_id] = {"admin_action": "reject", "selected_order": order_id, "step": "waiting_reason"}
+    elif callback_data == "no_orders":
+        edit_message(chat_id, message_id, "❌ <b>هیچ سفارش فعالی وجود ندارد!</b>", get_admin_menu_keyboard())
 
     return {"ok": True}
 
@@ -352,9 +360,9 @@ def handle_admin_message(chat_id, text):
             # پیدا کردن مشتری
             target_chat_id = None
             target_name = None
-            for sess in sessions.values():
+            for sess_key, sess in sessions.items():
                 if sess.get("order_id") == order_id:
-                    target_chat_id = sess.get("chat_id")
+                    target_chat_id = sess_key  # چت آیدی در کلید سشن ذخیره شده
                     target_name = sess.get("name")
                     break
             
@@ -379,7 +387,7 @@ def handle_admin_message(chat_id, text):
         target_name = None
         for sess_key, sess in sessions.items():
             if sess.get("order_id") == order_id:
-                target_chat_id = sess.get("chat_id")
+                target_chat_id = sess_key  # چت آیدی در کلید سشن ذخیره شده
                 target_name = sess.get("name")
                 break
         
