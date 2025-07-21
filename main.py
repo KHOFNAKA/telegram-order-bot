@@ -5,7 +5,7 @@ import uuid
 
 app = Flask(__name__)
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN = os.getenv("ADMIN_USERNAME", "KHOFNAKA")
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # چت آیدی ادمین
 ORDER_FILE = "orders.txt"
 sessions = {}
 
@@ -13,21 +13,36 @@ def save_order(data):
     with open(ORDER_FILE, "a", encoding="utf-8") as f:
         f.write(data + "\n----\n")
 
+def read_orders():
+    try:
+        with open(ORDER_FILE, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "هیچ سفارشی ثبت نشده است."
+
 def send_message(chat_id, text):
     requests.post(
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
         json={"chat_id": chat_id, "text": text}
     )
 
-def process_admin_command(cmd_text):
+def process_admin_command(cmd_text, chat_id):
     parts = cmd_text.split(maxsplit=2)
     action = parts[0]
-    if action not in ["/price", "/reject"]:
+    if action not in ["/price", "/reject", "/list_orders"]:
         return False
+
+    if action == "/list_orders":
+        orders = read_orders()
+        send_message(chat_id, orders or "هیچ سفارشی یافت نشد.")
+        return True
+
     if len(parts) < 2:
         return False
+
     order_id = parts[1]
     reason_or_price = parts[2] if len(parts) > 2 else ""
+
     target_chat_id = None
     target_name = None
     for sess in sessions.values():
@@ -35,12 +50,16 @@ def process_admin_command(cmd_text):
             target_chat_id = sess.get("chat_id")
             target_name = sess.get("name")
             break
+
     if not target_chat_id:
+        send_message(chat_id, "سفارش یافت نشد.")
         return False
+
     if action == "/price":
         msg = f"سلام {target_name} عزیز، قیمت پروژه شما {reason_or_price} تومان است. برای هماهنگی بیشتر لطفاً با شماره تماس بگیرید."
         send_message(target_chat_id, msg)
         return True
+
     if action == "/reject":
         msg = f"مشتری عزیز {target_name}، درخواست شما بررسی شد."
         if reason_or_price:
@@ -48,6 +67,7 @@ def process_admin_command(cmd_text):
         msg += " از صبوری و درک شما سپاسگزاریم."
         send_message(target_chat_id, msg)
         return True
+
     return False
 
 @app.route("/", methods=["POST"])
@@ -55,26 +75,35 @@ def webhook():
     data = request.get_json()
     if "message" not in data:
         return {"ok": True}
+
     message = data["message"]
-    chat_id = message["chat"]["id"]
+    chat_id = str(message["chat"]["id"])
     text = message.get("text", "")
-    if "username" in message["from"]:
-        sender_username = message["from"]["username"]
-    else:
-        sender_username = ""
-    if sender_username == ADMIN and (text.startswith("/price") or text.startswith("/reject")):
-        handled = process_admin_command(text)
-        if handled:
-            send_message(chat_id, "✅ دستور انجام شد.")
+
+    # بررسی اگر کاربر ادمین است
+    if chat_id == ADMIN_CHAT_ID:
+        if text == "/start":
+            send_message(chat_id, "خوش آمدید ادمین!\nدستورات مدیریت:\n/list_orders - مشاهده سفارش‌ها\n/price <شناسه> <قیمت> - اعلام قیمت\n/reject <شناسه> <دلیل> - رد سفارش")
             return {"ok": True}
+        if text.startswith(("/price", "/reject", "/list_orders")):
+            handled = process_admin_command(text, chat_id)
+            if handled:
+                send_message(chat_id, "✅ دستور انجام شد.")
+            else:
+                send_message(chat_id, "❌ دستور نامعتبر یا خطا در اجرا.")
+            return {"ok": True}
+
+    # فرآیند سفارش برای کاربران عادی
     if text == "/start":
-        sessions[str(chat_id)] = {"step": "name", "chat_id": chat_id}
+        sessions[chat_id] = {"step": "name", "chat_id": chat_id}
         send_message(chat_id, "سلام! لطفاً نام و نام خانوادگی خود را وارد کنید:")
         return {"ok": True}
-    sess = sessions.get(str(chat_id))
+
+    sess = sessions.get(chat_id)
     if not sess:
         send_message(chat_id, "لطفاً ابتدا /start را بزنید.")
         return {"ok": True}
+
     step = sess["step"]
     if step == "name":
         sess["name"] = text
@@ -142,15 +171,18 @@ def webhook():
                 f"Telegram Username: @{message['from'].get('username','')}\n"
             )
             save_order(order_text)
-            send_message(f"@{ADMIN}", f"سفارش جدید:\n{order_text}")
+            send_message(ADMIN_CHAT_ID, f"سفارش جدید:\n{order_text}")
             send_message(chat_id, "✅ اطلاعات شما ثبت شد. کارشناسان ما در حال بررسی هستند و به زودی قیمت اعلام می‌شود.")
-            sessions.pop(str(chat_id), None)
+            sessions.pop(chat_id, None)
         else:
             send_message(chat_id, "❌ سفارش لغو شد. برای شروع مجدد /start را بزنید.")
-            sessions.pop(str(chat_id), None)
+            sessions.pop(chat_id, None)
     else:
         send_message(chat_id, "لطفاً از دستور /start برای شروع استفاده کنید.")
     return {"ok": True}
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
