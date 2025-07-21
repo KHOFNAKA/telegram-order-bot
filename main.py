@@ -112,17 +112,24 @@ def get_yes_no_keyboard(action):
         [{"text": "✅ بله", "callback": f"{action}_yes"}, {"text": "❌ خیر", "callback": f"{action}_no"}]
     ])
 
-def get_cancel_keyboard():
-    return create_glass_keyboard([
-        [{"text": "🚫 لغو سفارش", "callback": "cancel_order"}]
-    ])
+def get_menu_keyboard():
+    return {
+        "keyboard": [
+            [{"text": "🏠 شروع مجدد"}, {"text": "🚫 لغو سفارش"}]
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False
+    }
 
 def get_admin_menu_keyboard():
-    return create_glass_keyboard([
-        [{"text": "📋 مشاهده سفارشات", "callback": "admin_list_orders"}],
-        [{"text": "💰 اعلام قیمت", "callback": "admin_set_price"}],
-        [{"text": "❌ رد سفارش", "callback": "admin_reject_order"}]
-    ])
+    return {
+        "keyboard": [
+            [{"text": "📋 مشاهده سفارشات"}],
+            [{"text": "💰 اعلام قیمت"}, {"text": "❌ رد سفارش"}]
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False
+    }
 
 def get_orders_selection_keyboard():
     keyboard_data = []
@@ -183,19 +190,7 @@ def handle_callback_query(callback_query):
         return handle_user_callback(chat_id, callback_data, message_id)
 
 def handle_admin_callback(chat_id, callback_data, message_id):
-    if callback_data == "admin_list_orders":
-        orders = read_orders()
-        edit_message(chat_id, message_id, f"<b>📋 لیست سفارشات:</b>\n\n<pre>{orders}</pre>", get_admin_menu_keyboard())
-    
-    elif callback_data == "admin_set_price":
-        edit_message(chat_id, message_id, "<b>💰 انتخاب سفارش برای اعلام قیمت:</b>", get_orders_selection_keyboard())
-        sessions[chat_id] = {"admin_action": "price"}
-    
-    elif callback_data == "admin_reject_order":
-        edit_message(chat_id, message_id, "<b>❌ انتخاب سفارش برای رد:</b>", get_orders_selection_keyboard())
-        sessions[chat_id] = {"admin_action": "reject"}
-    
-    elif callback_data.startswith("select_order_"):
+    if callback_data.startswith("select_order_"):
         order_id = callback_data.replace("select_order_", "")
         admin_session = sessions.get(chat_id, {})
         action = admin_session.get("admin_action")
@@ -311,7 +306,7 @@ Chat ID: {chat_id}
         
         # اعلام به ادمین
         admin_text = f"🆕 <b>سفارش جدید دریافت شد!</b>\n\n<pre>{order_text}</pre>"
-        send_message(ADMIN_CHAT_ID, admin_text, get_admin_menu_keyboard())
+        send_message(ADMIN_CHAT_ID, admin_text)
         
         # پیام تأیید به مشتری
         edit_message(chat_id, message_id, "✅ <b>سفارش شما با موفقیت ثبت شد!</b>\n\n🔖 شناسه سفارش: <code>" + sess.get('order_id', '') + "</code>\n\n⏳ کارشناسان ما در حال بررسی درخواست شما هستند و به زودی قیمت اعلام خواهد شد.\n\n📞 در صورت نیاز با پشتیبانی تماس بگیرید.")
@@ -328,8 +323,24 @@ Chat ID: {chat_id}
 def handle_admin_message(chat_id, text):
     admin_sess = sessions.get(chat_id, {})
     
-    if text == "/start":
+    if text == "/start" or text == "🏠 شروع مجدد":
         send_message(chat_id, "👨‍💼 <b>خوش آمدید ادمین عزیز!</b>\n\n🎛 <b>پنل مدیریت:</b>", get_admin_menu_keyboard())
+        return {"ok": True}
+    
+    # مدیریت دستورات منوی کیبورد
+    if text == "📋 مشاهده سفارشات":
+        orders = read_orders()
+        send_message(chat_id, f"<b>📋 لیست سفارشات:</b>\n\n<pre>{orders}</pre>", get_admin_menu_keyboard())
+        return {"ok": True}
+    
+    elif text == "💰 اعلام قیمت":
+        send_message(chat_id, "<b>💰 انتخاب سفارش برای اعلام قیمت:</b>", get_orders_selection_keyboard())
+        sessions[chat_id] = {"admin_action": "price"}
+        return {"ok": True}
+    
+    elif text == "❌ رد سفارش":
+        send_message(chat_id, "<b>❌ انتخاب سفارش برای رد:</b>", get_orders_selection_keyboard())
+        sessions[chat_id] = {"admin_action": "reject"}
         return {"ok": True}
     
     # مدیریت ورودی قیمت
@@ -366,7 +377,7 @@ def handle_admin_message(chat_id, text):
         # پیدا کردن مشتری
         target_chat_id = None
         target_name = None
-        for sess in sessions.values():
+        for sess_key, sess in sessions.items():
             if sess.get("order_id") == order_id:
                 target_chat_id = sess.get("chat_id")
                 target_name = sess.get("name")
@@ -378,7 +389,9 @@ def handle_admin_message(chat_id, text):
             send_message(chat_id, f"✅ <b>سفارش با موفقیت رد شد!</b>\n\n🔖 سفارش: <code>{order_id}</code>\n📝 دلیل: {reason}", get_admin_menu_keyboard())
             
             # حذف سشن مشتری
-            sessions = {k: v for k, v in sessions.items() if v.get("order_id") != order_id}
+            sessions_to_remove = [k for k, v in sessions.items() if v.get("order_id") == order_id]
+            for k in sessions_to_remove:
+                sessions.pop(k, None)
         else:
             send_message(chat_id, "❌ <b>خطا:</b> سفارش یافت نشد!", get_admin_menu_keyboard())
         
@@ -387,7 +400,7 @@ def handle_admin_message(chat_id, text):
     return {"ok": True}
 
 def handle_user_message(chat_id, text, message):
-    if text == "/start":
+    if text == "/start" or text == "🏠 شروع مجدد":
         sessions[chat_id] = {"step": "name", "chat_id": chat_id}
         welcome_msg = """
 🌟 <b>سلام! به سیستم سفارش وب‌سایت خوش آمدید</b> 🌟
@@ -396,35 +409,41 @@ def handle_user_message(chat_id, text, message):
 
 👤 <b>لطفاً نام و نام خانوادگی خود را وارد کنید:</b>
         """
-        send_message(chat_id, welcome_msg, get_cancel_keyboard())
+        send_message(chat_id, welcome_msg, get_menu_keyboard())
+        return {"ok": True}
+    
+    # مدیریت لغو سفارش
+    if text == "🚫 لغو سفارش":
+        send_message(chat_id, "❌ <b>سفارش لغو شد.</b>\nبرای شروع مجدد 'شروع مجدد' را انتخاب کنید.", get_menu_keyboard())
+        sessions.pop(chat_id, None)
         return {"ok": True}
 
     sess = sessions.get(chat_id)
     if not sess:
-        send_message(chat_id, "🔄 <b>لطفاً ابتدا /start را بزنید.</b>")
+        send_message(chat_id, "🔄 <b>لطفاً ابتدا 'شروع مجدد' را انتخاب کنید.</b>", get_menu_keyboard())
         return {"ok": True}
 
     step = sess["step"]
     
     if step == "name":
         if len(text.strip()) < 2:
-            send_message(chat_id, "❌ <b>نام وارد شده کوتاه است!</b>\nلطفاً نام کامل خود را وارد کنید:", get_cancel_keyboard())
+            send_message(chat_id, "❌ <b>نام وارد شده کوتاه است!</b>\nلطفاً نام کامل خود را وارد کنید:", get_menu_keyboard())
             return {"ok": True}
         sess["name"] = text.strip()
         sess["step"] = "phone"
-        send_message(chat_id, "📱 <b>شماره تماس خود را وارد کنید:</b>\n<i>(مثال: 09123456789)</i>", get_cancel_keyboard())
+        send_message(chat_id, "📱 <b>شماره تماس خود را وارد کنید:</b>\n<i>(مثال: 09123456789)</i>", get_menu_keyboard())
 
     elif step == "phone":
         if not validate_phone(text):
-            send_message(chat_id, "❌ <b>شماره تلفن نامعتبر است!</b>\nلطفاً شماره معتبر وارد کنید:\n<i>(مثال: 09123456789)</i>", get_cancel_keyboard())
+            send_message(chat_id, "❌ <b>شماره تلفن نامعتبر است!</b>\nلطفاً شماره معتبر وارد کنید:\n<i>(مثال: 09123456789)</i>", get_menu_keyboard())
             return {"ok": True}
         sess["phone"] = text.strip()
         sess["step"] = "email"
-        send_message(chat_id, "📧 <b>ایمیل خود را وارد کنید:</b>\n<i>(اختیاری - برای رد کردن نقطه بگذارید: .)</i>", get_cancel_keyboard())
+        send_message(chat_id, "📧 <b>ایمیل خود را وارد کنید:</b>\n<i>(اختیاری - برای رد کردن نقطه بگذارید: .)</i>", get_menu_keyboard())
 
     elif step == "email":
         if not validate_email(text):
-            send_message(chat_id, "❌ <b>ایمیل نامعتبر است!</b>\nلطفاً ایمیل معتبر وارد کنید یا برای رد کردن نقطه بگذارید:", get_cancel_keyboard())
+            send_message(chat_id, "❌ <b>ایمیل نامعتبر است!</b>\nلطفاً ایمیل معتبر وارد کنید یا برای رد کردن نقطه بگذارید:", get_menu_keyboard())
             return {"ok": True}
         sess["email"] = text.strip() if text.strip() != "." else ""
         sess["step"] = "business"
@@ -438,7 +457,7 @@ def handle_user_message(chat_id, text, message):
     elif step == "purpose_custom":
         sess["purpose"] = text.strip()
         sess["step"] = "features"
-        send_message(chat_id, "⚡ <b>ویژگی‌های مدنظر خود را بنویسید:</b>\n<i>(مثال: گالری تصاویر، فرم تماس، وبلاگ، درگاه پرداخت)</i>", get_cancel_keyboard())
+        send_message(chat_id, "⚡ <b>ویژگی‌های مدنظر خود را بنویسید:</b>\n<i>(مثال: گالری تصاویر، فرم تماس، وبلاگ، درگاه پرداخت)</i>", get_menu_keyboard())
 
     elif step == "features":
         sess["features"] = text.strip()
